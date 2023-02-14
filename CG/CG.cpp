@@ -259,10 +259,24 @@ void task_2_4() {
     save_file("task_2_4.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
 }
 
+void save_points(unsigned char*& img, int w, int h, std::vector<point>& points, unsigned char point_mask[3]) {
+    for (point p : points) {
+        for (int k = 0; k < 3; ++k)
+            img[idx((int)(-50 * p.y + 700), (int)(50 * p.z + 500), k, w, 3)] = point_mask[k];
+    }
+    save_file("points.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
 int main()
 {
-    task_2_1();
-    task_2_2();
-    task_2_3();
-    task_2_4();
+    int h = 1000;
+    int w = 1000;
+    unsigned char* img = new unsigned char[w * h * 3];
+    for (int i = 0; i < w * h * 3; ++i) {
+        img[i] = 255;
+    }
+    std::vector<point> points;
+    read_from_obj("dog.obj", points);
+    unsigned char point_mask[3] = { 0, 0, 0 };
+    save_points(img, w, h, points, point_mask);
 }
