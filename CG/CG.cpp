@@ -88,6 +88,12 @@ struct point {
     double y;
     double z;
 
+    point() {
+        x = 0;
+        y = 0;
+        z = 0;
+    }
+
     point(double coords[3]) {
         x = coords[0];
         y = coords[1];
@@ -95,7 +101,19 @@ struct point {
     }
 };
 
-void read_from_obj(std::string filename, std::vector<point>& res) {
+struct polygon {
+    point x;
+    point y;
+    point z;
+
+    polygon(point coords[3]) {
+        x = coords[0];
+        y = coords[1];
+        z = coords[2];
+    }
+};
+
+void read_from_obj(std::string filename, std::vector<point>& res, std::vector<polygon>& polygons) {
     std::ifstream file(filename);
     std::string curr;
     while (getline(file, curr)) {
@@ -117,6 +135,26 @@ void read_from_obj(std::string filename, std::vector<point>& res) {
                 }
             }
             res.push_back(point(coords));
+        }
+        else if (curr[0] == 'f' && curr[1] == ' ') {
+            std::string numb = "";
+            point points[3];
+            int pos = 0;
+            for (int i = 2; i < curr.size(); ++i) {
+                if (curr[i] == '/') {
+                    points[pos] = res[std::stoi(numb) - 1];
+                    ++pos;
+                    numb = "";
+                    i += numb.length();
+                }
+                else if (curr[i] == ' ') {
+                    numb = "";
+                }
+                else {
+                    numb.push_back(curr[i]);
+                }
+            }
+            polygons.push_back(polygon(points));
         }
     }
 }
@@ -262,9 +300,18 @@ void task_2_4() {
 void save_points(unsigned char*& img, int w, int h, std::vector<point>& points, unsigned char point_mask[3]) {
     for (point p : points) {
         for (int k = 0; k < 3; ++k)
-            img[idx((int)(-50 * p.y + 700), (int)(50 * p.z + 500), k, w, 3)] = point_mask[k];
+            img[idx((int)(-30 * p.y + 500), (int)(30 * p.z + 500), k, w, 3)] = point_mask[k];
     }
     save_file("points.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
+void draw_lines(unsigned char*& img, int w, int h, std::vector<polygon>& polygons) {
+    for (polygon p : polygons) {
+        line_2_4((int)(-30 * p.x.y + 500), (int)(30 * p.x.z + 500), (int)(-30 * p.y.y + 500), (int)(30 * p.y.z + 500), w, img);
+        line_2_4((int)(-30 * p.x.y + 500), (int)(30 * p.x.z + 500), (int)(-30 * p.z.y + 500), (int)(30 * p.z.z + 500), w, img);
+        line_2_4((int)(-30 * p.z.y + 500), (int)(30 * p.z.z + 500), (int)(-30 * p.y.y + 500), (int)(30 * p.y.z + 500), w, img);
+    }
+    save_file("lines.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
 }
 
 int main()
@@ -273,10 +320,12 @@ int main()
     int w = 1000;
     unsigned char* img = new unsigned char[w * h * 3];
     for (int i = 0; i < w * h * 3; ++i) {
-        img[i] = 255;
+        img[i] = 0;
     }
     std::vector<point> points;
-    read_from_obj("dog.obj", points);
-    unsigned char point_mask[3] = { 0, 0, 0 };
+    std::vector<polygon> polygons;
+    read_from_obj("dog.obj", points, polygons);
+    unsigned char point_mask[3] = { 255, 255, 255 };
     save_points(img, w, h, points, point_mask);
+    draw_lines(img, w, h, polygons);
 }
