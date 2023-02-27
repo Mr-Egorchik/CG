@@ -314,8 +314,101 @@ void draw_lines(unsigned char*& img, int w, int h, std::vector<polygon>& polygon
     save_file("lines.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
 }
 
+struct dot {
+    double x;
+    double y;
+
+    dot() {
+        this->x = 0.;
+        this->y = 0.;
+    }
+
+    dot(double x, double y) {
+        this->x = x;
+        this->y = y;
+    }
+
+    int int_x() {
+        return (int)x;
+    }
+
+    int int_y() {
+        return (int)y;
+    }
+};
+
+struct triangle {
+    dot a;
+    dot b;
+    dot c;
+
+    triangle(dot a, dot b, dot c) {
+        this->a = a;
+        this->b = b;
+        this->c = c;
+    }
+};
+
+double* barycentric_coordinates(triangle& tr, dot& d) {
+    double* res = new double[3];
+    res[0] = ((tr.b.x - tr.c.x) * (d.int_y() - tr.c.y) - (tr.b.y - tr.c.y) * (d.int_x() - tr.c.x)) / ((tr.b.x - tr.c.x) * (tr.a.y - tr.c.y) - (tr.b.y - tr.c.y) * (tr.a.x - tr.c.x));
+    res[1] = ((tr.c.x - tr.a.x) * (d.int_y() - tr.a.y) - (tr.c.y - tr.a.y) * (d.int_x() - tr.a.x)) / ((tr.c.x - tr.a.x) * (tr.b.y - tr.a.y) - (tr.c.y - tr.a.y) * (tr.b.x - tr.a.x));
+    res[2] = ((tr.a.x - tr.b.x) * (d.int_y() - tr.b.y) - (tr.a.y - tr.b.y) * (d.int_x() - tr.b.x)) / ((tr.a.x - tr.b.x) * (tr.c.y - tr.b.y) - (tr.a.y - tr.b.y) * (tr.c.x - tr.b.x));
+    return res;
+}
+
+void draw_triangle(triangle& tr, unsigned char*& img, int w, int h, unsigned char point_mask[3]) {
+    double xmin = std::min(tr.a.x, std::min(tr.b.x, tr.c.x));
+    double xmax = std::max(tr.a.x, std::max(tr.b.x, tr.c.x));
+    double ymin = std::min(tr.a.y, std::min(tr.b.y, tr.c.y));
+    double ymax = std::max(tr.a.y, std::max(tr.b.y, tr.c.y));
+    xmin = xmin < 0 ? 0 : xmin;
+    ymin = ymin < 0 ? 0 : ymin;
+    xmax = xmax < w ? xmax : w;
+    ymax = ymax < h ? ymax : h;
+    for (int i = xmin; i < xmax; ++i) {
+        for (int j = ymin; j < ymax; ++j) {
+            dot d = dot(i, j);
+            double* bc = barycentric_coordinates(tr, d);
+            if (bc[0] > 0 && bc[1] > 0 && bc[2] > 0) {
+                for (int k = 0; k < 3; ++k) {
+                    img[idx(i, j, k, w, 3)] = point_mask[k];
+                }
+            }
+            delete(bc);
+        }
+    }
+}
+
+void triangle_task() {
+    triangle t = triangle(dot(0., 0.), dot(3., 0.), dot(0., 4.));
+    dot d = dot(1, 2);
+    int h = 10;
+    int w = 10;
+    unsigned char* img = new unsigned char[w * h * 3];
+    for (int i = 0; i < w * h * 3; ++i) {
+        img[i] = 0;
+    }
+    unsigned char point_mask[3] = { 255, 255, 255 };
+    draw_triangle(t, img, w, h, point_mask);
+    save_file("triangle.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+    delete[](img);
+    //double* bc = barycentric_coordinates(t, d);
+    //std::cout << bc[0] << " + " << bc[1] << " + " << bc[2] << " = " << bc[0] + bc[1] + bc[2] << '\n';
+}
+
+void fill_polygons(std::vector<polygon>& polygons, unsigned char*& img, int w, int h) {
+    for (polygon p : polygons) {
+        unsigned char point_mask[3] = {rand() % 256 , rand() % 256 , rand() % 256 };
+        triangle t = triangle(dot(-30 * p.x.y + 500, 30 * p.x.z + 500), dot(-30 * p.y.y + 500, 30 * p.y.z + 500), dot(-30 * p.z.y + 500, 30 * p.z.z + 500));
+        draw_triangle(t, img, w, h, point_mask);
+    }
+    save_file("colored_dog.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
 int main()
 {
+    srand(NULL);
     int h = 1000;
     int w = 1000;
     unsigned char* img = new unsigned char[w * h * 3];
@@ -328,4 +421,6 @@ int main()
     unsigned char point_mask[3] = { 255, 255, 255 };
     save_points(img, w, h, points, point_mask);
     draw_lines(img, w, h, polygons);
+    fill_polygons(polygons, img, w, h);
+    delete[](img);
 }
