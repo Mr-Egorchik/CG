@@ -4,8 +4,11 @@
 #include <fstream>
 #include <string>
 #include <cmath>
+#include <limits>
 #define idx(i, j, k, row_len, depth) (i * row_len * depth + j * depth + k)
 #define PI 3.14159265
+
+using namespace std;
 
 int save_file(std::string filename, int w, int h, int bitdepth, int colortype, unsigned char* picture, int pitch) {
     FILE* fp = fopen(filename.c_str(), "wb");
@@ -99,6 +102,12 @@ struct point {
         y = coords[1];
         z = coords[2];
     }
+
+    point(double x, double y, double z) {
+        this->x = x;
+        this->y = y;
+        this->z = z;
+    }
 };
 
 struct polygon {
@@ -110,6 +119,12 @@ struct polygon {
         x = coords[0];
         y = coords[1];
         z = coords[2];
+    }
+
+    polygon(point x, point y, point z) {
+        this->x = x;
+        this->y = y;
+        this->z = z;
     }
 };
 
@@ -142,10 +157,12 @@ void read_from_obj(std::string filename, std::vector<point>& res, std::vector<po
             int pos = 0;
             for (int i = 2; i < curr.size(); ++i) {
                 if (curr[i] == '/') {
-                    points[pos] = res[std::stoi(numb) - 1];
-                    ++pos;
-                    numb = "";
-                    i += numb.length();
+                    if (numb != "") {
+                        points[pos] = res[std::stoi(numb) - 1];
+                        ++pos;
+                        numb = "";
+                        i += numb.length();
+                    }
                 }
                 else if (curr[i] == ' ') {
                     numb = "";
@@ -399,11 +416,85 @@ void triangle_task() {
 
 void fill_polygons(std::vector<polygon>& polygons, unsigned char*& img, int w, int h) {
     for (polygon p : polygons) {
-        unsigned char point_mask[3] = {rand() % 256 , rand() % 256 , rand() % 256 };
+        unsigned char point_mask[3] = { rand() % 256 , rand() % 256 , rand() % 256 };
         triangle t = triangle(dot(-30 * p.x.y + 500, 30 * p.x.z + 500), dot(-30 * p.y.y + 500, 30 * p.y.z + 500), dot(-30 * p.z.y + 500, 30 * p.z.z + 500));
         draw_triangle(t, img, w, h, point_mask);
     }
     save_file("colored_dog.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
+void find_norm(point& norm, polygon polygon) {
+    norm.x = ((polygon.y.y - polygon.x.y) * (polygon.y.z - polygon.z.z) - (polygon.y.z - polygon.x.z) * (polygon.y.y - polygon.z.y));
+    norm.y = ((polygon.y.z - polygon.x.z) * (polygon.y.x - polygon.z.x) - (polygon.y.z - polygon.x.z) * (polygon.y.z - polygon.z.z));
+    norm.z = ((polygon.y.x - polygon.x.x) * (polygon.y.y - polygon.z.y) - (polygon.y.y - polygon.x.y) * (polygon.y.x - polygon.z.x));
+}
+
+vector<polygon> get_good_polygons(vector<polygon>& polygons) {
+    vector<polygon> new_polygons;
+    point norm = point();
+    for (polygon p : polygons) {
+        find_norm(norm, p);
+        if (norm.x / sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z) < 0) {
+            new_polygons.push_back(p);
+        }
+    }
+    return new_polygons;
+}
+
+void fill_polygons_with_shades(std::vector<polygon>& polygons, unsigned char*& img, int w, int h) {
+    point norm = point();
+    for (polygon p : polygons) {
+        find_norm(norm, p);
+        int arg1 = (int)(255 * (norm.x / sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z))) % 256;
+        unsigned char point_mask[3] = { 0, 0, 255 - arg1 };
+        triangle t = triangle(dot(-30 * p.x.y + 500, 30 * p.x.z + 500), dot(-30 * p.y.y + 500, 30 * p.y.z + 500), dot(-30 * p.z.y + 500, 30 * p.z.z + 500));
+        draw_triangle(t, img, w, h, point_mask);
+    }
+    save_file("shade_dog.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
+void draw_triangle_z_buffer(triangle& tr, polygon& p, double*& z_buffer, unsigned char*& img, int w, int h, unsigned char point_mask[3]) {
+    double xmin = std::min(tr.a.x, std::min(tr.b.x, tr.c.x));
+    double xmax = std::max(tr.a.x, std::max(tr.b.x, tr.c.x));
+    double ymin = std::min(tr.a.y, std::min(tr.b.y, tr.c.y));
+    double ymax = std::max(tr.a.y, std::max(tr.b.y, tr.c.y));
+    xmin = xmin < 0 ? 0 : xmin;
+    ymin = ymin < 0 ? 0 : ymin;
+    xmax = xmax < w ? xmax : w;
+    ymax = ymax < h ? ymax : h;
+    for (int i = xmin; i < xmax; ++i) {
+        for (int j = ymin; j < ymax; ++j) {
+            dot d = dot(i, j);
+            double* bc = barycentric_coordinates(tr, d);
+            if (bc[0] > 0 && bc[1] > 0 && bc[2] > 0) {
+                double z_0 = bc[0] * p.x.x + bc[1] * p.y.x + bc[2] * p.z.x;
+                if (!(z_0 > z_buffer[i * w + j])) {
+                    for (int k = 0; k < 3; ++k) {
+                        img[idx(i, j, k, w, 3)] = point_mask[k];
+                    }
+                    z_buffer[i * w + j] = z_0;
+                }
+            }
+            delete[](bc);
+        }
+    }
+}
+
+void fill_polygons_with_z_buffer(std::vector<polygon>& polygons, unsigned char*& img, int w, int h) {
+    double* z_buffer = new double[w * h];
+    for (int i = 0; i < w * h; ++i) {
+        z_buffer[i] = numeric_limits<double>::max();
+    }
+    point norm = point();
+    for (polygon p : polygons) {
+        find_norm(norm, p);
+        int arg1 = (int)(255 * (norm.x / sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z))) % 256;
+        unsigned char point_mask[3] = { 0, 0, arg1 };
+        triangle t = triangle(dot(-30 * p.x.y + 500, 30 * p.x.z + 500), dot(-30 * p.y.y + 500, 30 * p.y.z + 500), dot(-30 * p.z.y + 500, 30 * p.z.z + 500));
+        draw_triangle_z_buffer(t, p, z_buffer, img, w, h, point_mask);
+    }
+    delete[](z_buffer);
+    save_file("z_buffered_dog.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
 }
 
 int main()
@@ -419,8 +510,11 @@ int main()
     std::vector<polygon> polygons;
     read_from_obj("dog.obj", points, polygons);
     unsigned char point_mask[3] = { 255, 255, 255 };
-    save_points(img, w, h, points, point_mask);
-    draw_lines(img, w, h, polygons);
-    fill_polygons(polygons, img, w, h);
+    //save_points(img, w, h, points, point_mask);
+    //draw_lines(img, w, h, polygons);
+    //fill_polygons(polygons, img, w, h);
+    vector<polygon> new_polys = get_good_polygons(polygons);
+    fill_polygons_with_shades(new_polys, img, w, h);
+    fill_polygons_with_z_buffer(polygons, img, w, h);
     delete[](img);
 }
