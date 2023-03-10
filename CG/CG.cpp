@@ -641,7 +641,10 @@ void upd_polygons_data(vector<point>& points, vector<polygon>& polygons) {
 }
 
 void guro(std::vector<point>& points, vector<polygon>& polygons, unsigned char*& img, int w, int h) {
-    
+    double* z_buffer = new double[w * h];
+    for (int i = 0; i < w * h; ++i) {
+        z_buffer[i] = numeric_limits<double>::max();
+    }
     for (polygon p : polygons) {
         point pa = points[p.points[0]];
         point pb = points[p.points[1]];
@@ -661,18 +664,22 @@ void guro(std::vector<point>& points, vector<polygon>& polygons, unsigned char*&
         ymin = ymin < 0 ? 0 : ymin;
         xmax = xmax < w ? xmax : w;
         ymax = ymax < h ? ymax : h;
+        double l0 = a.norm[2] / sqrt(a.norm[0] * a.norm[0] + a.norm[1] * a.norm[1] + a.norm[2] * a.norm[2]);
+        double l1 = b.norm[2] / sqrt(b.norm[0] * b.norm[0] + b.norm[1] * b.norm[1] + b.norm[2] * b.norm[2]);
+        double l2 = c.norm[2] / sqrt(c.norm[0] * c.norm[0] + c.norm[1] * c.norm[1] + c.norm[2] * c.norm[2]);
         for (int i = xmin; i < xmax; ++i) {
             for (int j = ymin; j < ymax; ++j) {
                 dot d = dot(i, j);
                 double* bc = barycentric_coordinates(tr, d);
                 if (bc[0] > 0 && bc[1] > 0 && bc[2] > 0) {
-                    double l0 = a.norm[2] / sqrt(a.norm[0] * a.norm[0] + a.norm[1] * a.norm[1] + a.norm[2] * a.norm[2]);
-                    double l1 = b.norm[2] / sqrt(b.norm[0] * b.norm[0] + b.norm[1] * b.norm[1] + b.norm[2] * b.norm[2]);
-                    double l2 = c.norm[2] / sqrt(c.norm[0] * c.norm[0] + c.norm[1] * c.norm[1] + c.norm[2] * c.norm[2]);
                     double arg1 = bc[0] * l0 + bc[1] * l1 + bc[2] * l2;
-                    img[idx(i, j, 0, w, 3)] = 0;
-                    img[idx(i, j, 1, w, 3)] = 0;
-                    img[idx(i, j, 2, w, 3)] = 255 - (char)(255*arg1) % 256;/*
+                    double z_0 = bc[0] * p.x.z + bc[1] * p.y.z + bc[2] * p.z.z;
+                    if(!(z_0 > z_buffer[i * w + j])) {
+                        img[idx(i, j, 0, w, 3)] = 0;
+                        img[idx(i, j, 1, w, 3)] = 0;
+                        img[idx(i, j, 2, w, 3)] = (char)(255 * arg1) % 256;
+                        z_buffer[i * w + j] = z_0;
+                    }/*
                     printf("arg1 = %f\t color = %d\n", arg1, (char)(255 * arg1) % 255);*/
                 }
                 delete[](bc);
@@ -711,16 +718,15 @@ int main()
     double t[3] = { 0, 0, 50 };
     projective_transform(points, scale, 500, 250, t, new_points);
     vector<point> rotated_new_points;
-    //rotate(points, 0, 0, -90, rotated_new_points);
-    //upd_polygons_data(rotated_new_points, polygons);
-    //for (int i = 0; i < rotated_new_points.size(); ++i) {
-    //    set_norm(polygons, rotated_new_points[i]);
-    //    rotated_new_points[i].set_light();
-    //}
-    //upd_polygons_data(rotated_new_points, polygons);
-    //fill_polygons_with_z_buffer(polygons, img, w, h);
-    //new_points.clear();
-    //projective_transform(rotated_new_points, scale, 600, 600, t, new_points);
+    rotate(points, 170, -20, -90, rotated_new_points);
+    upd_polygons_data(rotated_new_points, polygons);
+    for (int i = 0; i < rotated_new_points.size(); ++i) {
+        set_norm(polygons, rotated_new_points[i]);
+        rotated_new_points[i].set_light();
+    }
+    upd_polygons_data(rotated_new_points, polygons);
+    new_points.clear();
+    projective_transform(rotated_new_points, scale, 600, 600, t, new_points);
     //upd_save_points(img, w, h, new_points, point_mask);
     guro(new_points, polygons, img, w, h);
     delete[](img);
