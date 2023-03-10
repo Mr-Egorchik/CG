@@ -90,6 +90,9 @@ struct point {
     double x;
     double y;
     double z;
+    vector<int> polygons = {};
+    double norm[3] = {0, 0, 0};
+    unsigned char light[3] = { 0, 0, 0 };
 
     point() {
         x = 0;
@@ -108,12 +111,30 @@ struct point {
         this->y = y;
         this->z = z;
     }
+
+    void add_polygon(int idx) {
+        this->polygons.push_back(idx);
+    }
+
+    void set_norm(double norm[3]) {
+        this->norm[0] = norm[0];
+        this->norm[1] = norm[1];
+        this->norm[2] = norm[2];
+    }
+
+    void set_light() {
+        char arg1 = (char)(255 * (norm[2] / sqrt(norm[0] * norm[0] + norm[1] * norm[1] + norm[2] * norm[2]))) % 256;
+        light[0] = 0;
+        light[1] = 0;
+        light[2] = arg1;
+    }
 };
 
 struct polygon {
     point x;
     point y;
     point z;
+    vector<unsigned int> points = {};
 
     polygon(point coords[3]) {
         x = coords[0];
@@ -131,6 +152,7 @@ struct polygon {
 void read_from_obj(std::string filename, std::vector<point>& res, std::vector<polygon>& polygons) {
     std::ifstream file(filename);
     std::string curr;
+    int polygons_counter = 0;
     while (getline(file, curr)) {
         if (curr[0] == 'v' && curr[1] == ' ') {
             std::string numb = "";
@@ -154,11 +176,13 @@ void read_from_obj(std::string filename, std::vector<point>& res, std::vector<po
         else if (curr[0] == 'f' && curr[1] == ' ') {
             std::string numb = "";
             point points[3];
+            int idx[3];
             int pos = 0;
             for (int i = 2; i < curr.size(); ++i) {
                 if (curr[i] == '/') {
                     if (numb != "") {
                         points[pos] = res[std::stoi(numb) - 1];
+                        idx[pos] = std::stoi(numb) - 1;
                         ++pos;
                         numb = "";
                         i += numb.length();
@@ -171,7 +195,18 @@ void read_from_obj(std::string filename, std::vector<point>& res, std::vector<po
                     numb.push_back(curr[i]);
                 }
             }
+            for (int i : idx) {
+                res[i].add_polygon(polygons_counter);
+            }
+            for (auto p : points) {
+                p.add_polygon(polygons_counter);
+            }
             polygons.push_back(polygon(points));
+            for (int i : idx) {
+                polygons[polygons.size() - 1].points.push_back(i);
+            }
+            
+            ++polygons_counter;
         }
     }
 }
@@ -334,6 +369,7 @@ void draw_lines(unsigned char*& img, int w, int h, std::vector<polygon>& polygon
 struct dot {
     double x;
     double y;
+    double norm[3] = {0, 0, 0};
 
     dot() {
         this->x = 0.;
@@ -351,6 +387,12 @@ struct dot {
 
     int int_y() {
         return (int)y;
+    }
+
+    void set_norm(double norm[3]) {
+        this->norm[0] = norm[0];
+        this->norm[1] = norm[1];
+        this->norm[2] = norm[2];
     }
 };
 
@@ -425,8 +467,11 @@ void fill_polygons(std::vector<polygon>& polygons, unsigned char*& img, int w, i
 
 void find_norm(point& norm, polygon polygon) {
     norm.x = ((polygon.y.y - polygon.x.y) * (polygon.y.z - polygon.z.z) - (polygon.y.z - polygon.x.z) * (polygon.y.y - polygon.z.y));
-    norm.y = ((polygon.y.z - polygon.x.z) * (polygon.y.x - polygon.z.x) - (polygon.y.z - polygon.x.z) * (polygon.y.z - polygon.z.z));
+    norm.y = ((polygon.y.z - polygon.x.z) * (polygon.y.x - polygon.z.x) - (polygon.y.x - polygon.x.x) * (polygon.y.z - polygon.z.z));
     norm.z = ((polygon.y.x - polygon.x.x) * (polygon.y.y - polygon.z.y) - (polygon.y.y - polygon.x.y) * (polygon.y.x - polygon.z.x));
+    /*norm.x = ((polygon.y.z - polygon.x.z) * (polygon.y.x - polygon.z.x) - (polygon.y.x - polygon.x.x) * (polygon.y.z - polygon.z.z));
+    norm.y = ((polygon.y.x - polygon.x.x) * (polygon.y.y - polygon.z.y) - (polygon.y.y - polygon.x.y) * (polygon.y.x - polygon.z.x));
+    norm.z = ((polygon.y.y - polygon.x.y) * (polygon.y.z - polygon.z.z) - (polygon.y.z - polygon.x.z) * (polygon.y.y - polygon.z.y));*/
 }
 
 vector<polygon> get_good_polygons(vector<polygon>& polygons) {
@@ -488,13 +533,153 @@ void fill_polygons_with_z_buffer(std::vector<polygon>& polygons, unsigned char*&
     point norm = point();
     for (polygon p : polygons) {
         find_norm(norm, p);
-        int arg1 = (int)(255 * (norm.x / sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z))) % 256;
+        char arg1 = (char)(255 * (norm.x / sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z))) % 256;
         unsigned char point_mask[3] = { 0, 0, arg1 };
         triangle t = triangle(dot(-30 * p.x.y + 500, 30 * p.x.z + 500), dot(-30 * p.y.y + 500, 30 * p.y.z + 500), dot(-30 * p.z.y + 500, 30 * p.z.z + 500));
         draw_triangle_z_buffer(t, p, z_buffer, img, w, h, point_mask);
     }
     delete[](z_buffer);
     save_file("z_buffered_dog.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
+void projective_transform(vector<point>& points, double scale[2], int h, int w, double t[3], vector<point>& new_points) {
+    for (auto p : points) {
+        point new_point = point(scale[0] * p.x / (p.z + t[2]) + w, scale[1] * p.y / (p.z + t[2]) + h, (p.z + t[2]));
+        new_point.polygons = p.polygons;
+        new_point.set_norm(p.norm);
+        new_point.set_light();
+        new_points.push_back(new_point);
+    }
+}
+
+void upd_save_points(unsigned char*& img, int w, int h, std::vector<point>& points, unsigned char point_mask[3]) {
+    for (int i = 0; i < points.size(); ++i) {
+        point p = points[i];
+        for (int k = 0; k < 3; ++k) {
+
+            img[idx(abs((int)p.x), abs((int)p.y), k, w, 3)] = point_mask[k];
+        }
+    }
+    save_file("upd_points.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
+}
+
+void multiplyMatrices(double mat1[][3], double mat2[][3], double result[][3]) {
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            result[i][j] = 0;
+            for (int k = 0; k < 3; k++) {
+                result[i][j] += mat1[i][k] * mat2[k][j];
+            }
+        }
+    }
+}
+
+void rotate(const vector<point>& points, double yaw, double pitch, double roll, vector<point>& output) {
+    yaw = yaw * PI / 180.0;
+    pitch = pitch * PI / 180.0;
+    roll = roll * PI / 180.0;
+
+    // Construct rotation matrices for each axis
+    double cosYaw = cos(yaw);
+    double sinYaw = sin(yaw);
+    double yawMat[3][3] = {
+        {cosYaw, 0, sinYaw},
+        {0, 1, 0},
+        {-sinYaw, 0, cosYaw}
+    };
+
+    double cosPitch = cos(pitch);
+    double sinPitch = sin(pitch);
+    double pitchMat[3][3] = {
+        {1, 0, 0},
+        {0, cosPitch, sinPitch},
+        {0, -sinPitch, cosPitch}
+    };
+
+    double cosRoll = cos(roll);
+    double sinRoll = sin(roll);
+    double rollMat[3][3] = {
+        {cosRoll, sinRoll, 0},
+        {-sinRoll, cosRoll, 0},
+        {0, 0, 1}
+    };
+
+    double rotationMatSub[3][3];
+    double rotationMat[3][3];
+    multiplyMatrices(rollMat, yawMat, rotationMatSub);
+    multiplyMatrices(rotationMatSub, pitchMat, rotationMat);
+
+    for (auto p : points) {
+        double xRot = rotationMat[0][0] * p.x + rotationMat[0][1] * p.y + rotationMat[0][2] * p.z;
+        double yRot = rotationMat[1][0] * p.x + rotationMat[1][1] * p.y + rotationMat[1][2] * p.z;
+        double zRot = rotationMat[2][0] * p.x + rotationMat[2][1] * p.y + rotationMat[2][2] * p.z;
+        point new_point = point(xRot, yRot, zRot);
+        new_point.polygons = p.polygons;
+        new_point.set_norm(p.norm);
+        new_point.set_light();
+        output.push_back(new_point);
+    }
+}
+
+void set_norm(vector<polygon>& polygons, point& p) {
+    double res[3] = { 0, 0, 0 };
+    for (int i: p.polygons) {
+        polygon polygon = polygons[i];
+        res[0] += (((polygon.y.y - polygon.x.y) * (polygon.y.z - polygon.z.z) - (polygon.y.z - polygon.x.z) * (polygon.y.y - polygon.z.y))) / polygons.size();
+        res[1] += (((polygon.y.z - polygon.x.z) * (polygon.y.x - polygon.z.x) - (polygon.y.x - polygon.x.x) * (polygon.y.z - polygon.z.z))) / polygons.size();
+        res[2] += (((polygon.y.x - polygon.x.x) * (polygon.y.y - polygon.z.y) - (polygon.y.y - polygon.x.y) * (polygon.y.x - polygon.z.x))) / polygons.size();
+    }
+    p.set_norm(res);
+}
+
+void upd_polygons_data(vector<point>& points, vector<polygon>& polygons) {
+    for (int i = 0; i < polygons.size(); ++i) {
+        polygons[i].x = points[polygons[i].points[0]];
+        polygons[i].y = points[polygons[i].points[1]];
+        polygons[i].z = points[polygons[i].points[2]];
+    }
+}
+
+void guro(std::vector<point>& points, vector<polygon>& polygons, unsigned char*& img, int w, int h) {
+    
+    for (polygon p : polygons) {
+        point pa = points[p.points[0]];
+        point pb = points[p.points[1]];
+        point pc = points[p.points[2]];
+        dot a = dot(pa.x, pa.y);
+        dot b = dot(pb.x, pb.y);
+        dot c = dot(pc.x, pc.y);
+        triangle tr = triangle(a, b, c);
+        a.set_norm(pa.norm);
+        b.set_norm(pb.norm);
+        c.set_norm(pc.norm);
+        double xmin = std::min(tr.a.x, std::min(tr.b.x, tr.c.x));
+        double xmax = std::max(tr.a.x, std::max(tr.b.x, tr.c.x));
+        double ymin = std::min(tr.a.y, std::min(tr.b.y, tr.c.y));
+        double ymax = std::max(tr.a.y, std::max(tr.b.y, tr.c.y));
+        xmin = xmin < 0 ? 0 : xmin;
+        ymin = ymin < 0 ? 0 : ymin;
+        xmax = xmax < w ? xmax : w;
+        ymax = ymax < h ? ymax : h;
+        for (int i = xmin; i < xmax; ++i) {
+            for (int j = ymin; j < ymax; ++j) {
+                dot d = dot(i, j);
+                double* bc = barycentric_coordinates(tr, d);
+                if (bc[0] > 0 && bc[1] > 0 && bc[2] > 0) {
+                    double l0 = a.norm[2] / sqrt(a.norm[0] * a.norm[0] + a.norm[1] * a.norm[1] + a.norm[2] * a.norm[2]);
+                    double l1 = b.norm[2] / sqrt(b.norm[0] * b.norm[0] + b.norm[1] * b.norm[1] + b.norm[2] * b.norm[2]);
+                    double l2 = c.norm[2] / sqrt(c.norm[0] * c.norm[0] + c.norm[1] * c.norm[1] + c.norm[2] * c.norm[2]);
+                    double arg1 = bc[0] * l0 + bc[1] * l1 + bc[2] * l2;
+                    img[idx(i, j, 0, w, 3)] = 0;
+                    img[idx(i, j, 1, w, 3)] = 0;
+                    img[idx(i, j, 2, w, 3)] = 255 - (char)(255*arg1) % 256;/*
+                    printf("arg1 = %f\t color = %d\n", arg1, (char)(255 * arg1) % 255);*/
+                }
+                delete[](bc);
+            }
+        }
+    }
+    save_file("guro_dog.png", w, h, 8, PNG_COLOR_TYPE_RGB, img, 3 * w);
 }
 
 int main()
@@ -509,12 +694,34 @@ int main()
     std::vector<point> points;
     std::vector<polygon> polygons;
     read_from_obj("dog.obj", points, polygons);
+    for (int i = 0; i < points.size(); ++i) {
+        set_norm(polygons, points[i]);
+        points[i].set_light();
+    }
+    upd_polygons_data(points, polygons);
     unsigned char point_mask[3] = { 255, 255, 255 };
     //save_points(img, w, h, points, point_mask);
     //draw_lines(img, w, h, polygons);
     //fill_polygons(polygons, img, w, h);
-    vector<polygon> new_polys = get_good_polygons(polygons);
-    fill_polygons_with_shades(new_polys, img, w, h);
-    fill_polygons_with_z_buffer(polygons, img, w, h);
+    //vector<polygon> new_polys = get_good_polygons(polygons);
+    //fill_polygons_with_shades(new_polys, img, w, h);
+    //fill_polygons_with_z_buffer(polygons, img, w, h);
+    vector<point> new_points;
+    double scale[2] = { 2000, 2000 };
+    double t[3] = { 0, 0, 50 };
+    projective_transform(points, scale, 500, 250, t, new_points);
+    vector<point> rotated_new_points;
+    //rotate(points, 0, 0, -90, rotated_new_points);
+    //upd_polygons_data(rotated_new_points, polygons);
+    //for (int i = 0; i < rotated_new_points.size(); ++i) {
+    //    set_norm(polygons, rotated_new_points[i]);
+    //    rotated_new_points[i].set_light();
+    //}
+    //upd_polygons_data(rotated_new_points, polygons);
+    //fill_polygons_with_z_buffer(polygons, img, w, h);
+    //new_points.clear();
+    //projective_transform(rotated_new_points, scale, 600, 600, t, new_points);
+    //upd_save_points(img, w, h, new_points, point_mask);
+    guro(new_points, polygons, img, w, h);
     delete[](img);
 }
